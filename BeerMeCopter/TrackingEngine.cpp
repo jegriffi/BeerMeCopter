@@ -111,9 +111,10 @@ void morphOps(Mat &thresh){
 *	Return:  returns the area of the largest object that is being tracked for depth calculation
 **/
 
-bool objectFound(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i> &hierarchy){
+bool objectFound(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i> &hierarchy, int &largestObject){
 	bool found = false;
 	double refArea = 0;
+	largestObject = 0;
 
 	for(int i = 0; i >=0; i = hierarchy[i][0]){
 		Moments moment = moments ((cv::Mat)contours[i]);
@@ -128,6 +129,7 @@ bool objectFound(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i
 			y = moment.m01 / area;
 			found = true;
 			refArea = area;
+			largestObject = i;
 		} else 
 			found = false;
 	}
@@ -135,7 +137,20 @@ bool objectFound(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i
 	return found;
 }
 
-int getAreaOfLargestObject(int &x, int &y, Mat &cameraFeed, vector< vector<Point> > &contours ){
+int drawRectangle(int &x, int &y, Mat &cameraFeed, vector< vector<Point> > &contours, int &largestObject ){
+	//aproximate contours to the polygon
+	vector<Point> contours_poly;
+	Rect boundRect;
+	approxPolyDP(Mat(contours[largestObject]), contours_poly, 3, true);
+	boundRect = boundingRect(Mat(contours_poly));
+	//draws rectangle around largest object
+	rectangle(cameraFeed, boundRect.tl(), boundRect.br(), Scalar(0, 255, 0), 2, 8, 0);
+
+	std::cout << "area of largest object: " << boundRect.area() << std::endl;
+
+	return boundRect.area();
+	
+	/* Draws rectangle around all detected objects
 	//approximate contours to the polygon
 	vector<vector<Point>> contours_poly(contours.size());
 	vector<Rect> boundRect (contours.size());
@@ -154,10 +169,12 @@ int getAreaOfLargestObject(int &x, int &y, Mat &cameraFeed, vector< vector<Point
 	std::cout << "area of largest object: " << area << std::endl;
 
 	return area;
+	*/
 }
 
-void findFilteredObjects(int &x, int &y, int &area, vector< vector<Point> > &contours, vector<Vec4i> &hierarchy, Mat &cameraFeed) {
-	if(objectFound(x, y, contours, hierarchy)) {
+int findFilteredObjects(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i> &hierarchy, Mat &cameraFeed) {
+	int largestObject, area = 0;
+	if(objectFound(x, y, contours, hierarchy, largestObject)) {
 		char* trackingString = "Tracking Object";
 		putText(cameraFeed, trackingString, Point(0,50), 2, 1, Scalar(0, 255, 0), 2);
 
@@ -165,18 +182,20 @@ void findFilteredObjects(int &x, int &y, int &area, vector< vector<Point> > &con
 		drawObject(x, y, cameraFeed);
 
 		//calculate the area of the largest tracked object
-		area = getAreaOfLargestObject(x, y, cameraFeed, contours);
+		area = drawRectangle(x, y, cameraFeed, contours, largestObject);
 	} 
 	else {
 		putText(cameraFeed, "TOO MUCH NOISE! ADJUST FILTER", Point(0, 50), 1, 2, Scalar(0, 0, 255), 2);
 	}
+
+	return area;
 }
 
 int trackFilteredObject(int &x, int &y, Mat &threshold, Mat &cameraFeed){
 	Mat temp;
 	threshold.copyTo(temp);
 	//area of largest object found
-	int area = 0; // I changed this to 0 because an object of area 0 doesn't exist
+	//int area = 0; // I changed this to 0 because an object of area 0 doesn't exist
 
 	//these two vectors needed for output of findContours
 	vector< vector<Point> > contours;
@@ -187,9 +206,9 @@ int trackFilteredObject(int &x, int &y, Mat &threshold, Mat &cameraFeed){
 	//use moments method to find our filtered object
 	int size = hierarchy.size();
 	if (size && size < MAX_NUM_OBJECTS) 
-		findFilteredObjects(x, y, area, contours, hierarchy, cameraFeed);
-
-	return area;
+		return findFilteredObjects(x, y, contours, hierarchy, cameraFeed);
+	else
+		return 0;
 }
 
 int main(int argc, char* argv[])
