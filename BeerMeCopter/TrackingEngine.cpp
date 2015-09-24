@@ -3,6 +3,7 @@
 #include <iostream>
 #include <opencv/highgui.h>
 #include <opencv/cv.h>
+#include <time.h>
 
 using namespace cv;
 //initial min and max HSV filter values.
@@ -16,6 +17,11 @@ int V_MAX = 256;
 //default capture width and height
 const int FRAME_WIDTH = 640;
 const int FRAME_HEIGHT = 480;
+//values for location of lines
+const int CENTER_WIDTH = FRAME_WIDTH/2 + 1;
+const int CENTER_HEIGHT = FRAME_HEIGHT/2 + 1;
+const int deltaCenterX = 120;
+const int deltaCenterY = 100;
 //max number of objects to be detected in frame
 const int MAX_NUM_OBJECTS = 50;
 //minimum and maximum object area
@@ -39,28 +45,37 @@ string intToString(int number){
 	return ss.str();
 }
 
+void drawLines(Mat &frame) {
+	//vertical lines
+    line(frame, Point(CENTER_WIDTH - deltaCenterX, FRAME_HEIGHT), Point(CENTER_WIDTH - deltaCenterX, 0), Scalar(0, 0, 255), 2);
+    line(frame, Point(CENTER_WIDTH + deltaCenterX, FRAME_HEIGHT), Point(CENTER_WIDTH + deltaCenterX, 0), Scalar(0, 0, 255), 2);
+	//horizontal lines
+    line(frame, Point(FRAME_WIDTH, CENTER_HEIGHT - deltaCenterY), Point(0, CENTER_HEIGHT - deltaCenterY), Scalar(0, 255, 255), 2);
+    line(frame, Point(FRAME_WIDTH, CENTER_HEIGHT + deltaCenterY), Point(0, CENTER_HEIGHT + deltaCenterY), Scalar(0, 255, 255), 2);
+}
+
 void createTrackbars(){
-	//create window for trackbars
-	namedWindow(trackbarWindowName, 0);
-	//create memory to store trackbar name on window
-	char TrackbarName[50];
-	sprintf(TrackbarName, "H_MIN", H_MIN);
-	sprintf(TrackbarName, "H_MAX", H_MAX);
-	sprintf(TrackbarName, "S_MIN", S_MIN);
-	sprintf(TrackbarName, "S_MAX", S_MAX);
-	sprintf(TrackbarName, "V_MIN", V_MIN);
-	sprintf(TrackbarName, "V_MAX", V_MAX);
-	//create trackbars and insert them into window
-	//3 parameters are: the address of the variable that is changing when the trackbar is moved(eg.H_LOW),
-	//the max value the trackbar can move (eg. H_HIGH), 
-	//and the function that is called whenever the trackbar is moved(eg. on_trackbar)
-	//                                  ---->    ---->     ---->      
-	createTrackbar("H_MIN", trackbarWindowName, &H_MIN, H_MAX, on_trackbar);
-	createTrackbar("H_MAX", trackbarWindowName, &H_MAX, H_MAX, on_trackbar);
-	createTrackbar("S_MIN", trackbarWindowName, &S_MIN, S_MAX, on_trackbar);
-	createTrackbar("S_MAX", trackbarWindowName, &S_MAX, S_MAX, on_trackbar);
-	createTrackbar("V_MIN", trackbarWindowName, &V_MIN, V_MAX, on_trackbar);
-	createTrackbar("V_MAX", trackbarWindowName, &V_MAX, V_MAX, on_trackbar);
+    //create window for trackbars
+    namedWindow(trackbarWindowName, 0);
+    //create memory to store trackbar name on window
+    char TrackbarName[50];
+    sprintf(TrackbarName, "H_MIN", 0);
+    sprintf(TrackbarName, "H_MAX", 256);
+    sprintf(TrackbarName, "S_MIN", 0);
+    sprintf(TrackbarName, "S_MAX", 256);
+    sprintf(TrackbarName, "V_MIN", 0);
+    sprintf(TrackbarName, "V_MAX", 256);
+    //create trackbars and insert them into window
+    //3 parameters are: the address of the variable that is changing when the trackbar is moved(eg.H_LOW),
+    //the max value the trackbar can move (eg. H_HIGH),
+    //and the function that is called whenever the trackbar is moved(eg. on_trackbar)
+    //                                  ---->    ---->     ---->
+    createTrackbar("H_MIN", trackbarWindowName, &H_MIN, 256, on_trackbar);
+    createTrackbar("H_MAX", trackbarWindowName, &H_MAX, 256, on_trackbar);
+    createTrackbar("S_MIN", trackbarWindowName, &S_MIN, 256, on_trackbar);
+    createTrackbar("S_MAX", trackbarWindowName, &S_MAX, 256, on_trackbar);
+    createTrackbar("V_MIN", trackbarWindowName, &V_MIN, 256, on_trackbar);
+    createTrackbar("V_MAX", trackbarWindowName, &V_MAX, 256, on_trackbar);
 }
 
 void drawObject(int x, int y, Mat &frame){
@@ -95,12 +110,14 @@ void morphOps(Mat &thresh){
 
 	//dilate with larger element so make sure object is nicely visible
 	Mat dilateElement = getStructuringElement(MORPH_RECT, Size(8, 8));
-
+    
+    //morphological opening (remove small objects from the foreground)
 	erode(thresh, thresh, erodeElement);
-	erode(thresh, thresh, erodeElement);
-
 	dilate(thresh, thresh, dilateElement);
+    
+    //morphological closing (fill small holes in the foreground)
 	dilate(thresh, thresh, dilateElement);
+    erode(thresh, thresh, erodeElement);
 }
 
 
@@ -110,8 +127,7 @@ void morphOps(Mat &thresh){
 *	Return:  returns the area of the largest object that is being tracked for depth calculation
 **/
 
-bool objectFound(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i> &hierarchy, int &largestObject){
-	bool found = false;
+double objectFound(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i> &hierarchy, int &largestObject){
 	double refArea = 0;
 	largestObject = 0;
 
@@ -126,17 +142,16 @@ bool objectFound(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i
 		if(area > MIN_OBJECT_AREA && area < MAX_OBJECT_AREA && area > refArea) {
 			x = moment.m10 / area;
 			y = moment.m01 / area;
-			found = true;
 			refArea = area;
 			largestObject = i;
 		} else 
-			found = false;
+			refArea = 0;
 	}
 
-	return found;
+    return refArea;
 }
 
-int drawRectangle(int &x, int &y, Mat &cameraFeed, vector< vector<Point> > &contours, int &largestObject ){
+void drawRectangle(int &x, int &y, Mat &cameraFeed, vector< vector<Point> > &contours, int &largestObject ){
 	//aproximate contours to the polygon
 	vector<Point> contours_poly;
 	Rect boundRect;
@@ -144,44 +159,21 @@ int drawRectangle(int &x, int &y, Mat &cameraFeed, vector< vector<Point> > &cont
 	boundRect = boundingRect(Mat(contours_poly));
 	//draws rectangle around largest object
 	rectangle(cameraFeed, boundRect.tl(), boundRect.br(), Scalar(0, 255, 0), 2, 8, 0);
-
-	std::cout << "area of largest object: " << boundRect.area() << std::endl;
-
-	return boundRect.area();
-	
-	/* Draws rectangle around all detected objects
-	//approximate contours to the polygon
-	vector<vector<Point>> contours_poly(contours.size());
-	vector<Rect> boundRect (contours.size());
-	for(int i = 0; i < contours.size(); ++i) {
-		approxPolyDP(Mat(contours[i]), contours_poly[i], 3, true);
-		boundRect[i] = boundingRect(Mat(contours_poly[i]));
-	}
-	
-	int area = boundRect[0].area();
-	for(int i = 1; i < contours.size(); ++i)
-		if (boundRect[i].area() > area){
-			rectangle(cameraFeed, boundRect[i].tl(), boundRect[i].br(), Scalar(0, 255, 0), 2, 8, 0);
-			area = boundRect[i].area();
-		}
-
-	std::cout << "area of largest object: " << area << std::endl;
-
-	return area;
-	*/
 }
 
 int findFilteredObjects(int &x, int &y, vector< vector<Point> > &contours, vector<Vec4i> &hierarchy, Mat &cameraFeed) {
-	int largestObject, area = 0;
-	if(objectFound(x, y, contours, hierarchy, largestObject)) {
+	int largestObject = -1;
+    double area;
+	if(area = objectFound(x, y, contours, hierarchy, largestObject)) {
 		char* trackingString = "Tracking Object";
 		putText(cameraFeed, trackingString, Point(0,50), 2, 1, Scalar(0, 255, 0), 2);
+        std::cout << "area of largest object: " << area << std::endl;
 
 		//draw object location on screen
 		drawObject(x, y, cameraFeed);
 
 		//calculate the area of the largest tracked object
-		area = drawRectangle(x, y, cameraFeed, contours, largestObject);
+		drawRectangle(x, y, cameraFeed, contours, largestObject);
 	} 
 	else {
 		putText(cameraFeed, "TOO MUCH NOISE! ADJUST FILTER", Point(0, 50), 1, 2, Scalar(0, 0, 255), 2);
@@ -210,6 +202,73 @@ int trackFilteredObject(int &x, int &y, Mat &threshold, Mat &cameraFeed){
 	return 0;
 }
 
+void compareValues(int value, int &min, int &max){
+    if(value > max)
+        max = value;
+    if(value < min)
+        min = value;
+}
+
+void CompareHSV(Mat &HSV){
+    int h_min, s_min, v_min, h_max, s_max, v_max;
+    h_min = s_min = v_min = 256;
+    h_max = s_max = v_max = 0;
+    
+    for(int x = 0; x < HSV.rows; ++x)
+        for(int y = 0; y < HSV.cols; ++y){
+            Vec3b hsv = HSV.at<Vec3b>(x,y);
+            compareValues(hsv.val[0], h_min, h_max);
+            compareValues(hsv.val[1], s_min, s_max);
+            compareValues(hsv.val[2], v_min, v_max);
+        }
+    
+    H_MIN = h_min;
+    H_MAX = h_max;
+    S_MIN = s_min;
+    S_MAX = s_max;
+    V_MIN = v_min;
+    V_MAX = v_max;
+}
+
+void waitForObject(VideoCapture &feed, Rect &detectionRectangle, int seconds){
+    Mat image;
+    time_t start, end;
+    
+    for(time(&start), time(&end); difftime (end,start) < seconds; time(&end)){
+        if(!feed.read(image)){
+            std::cout << "Cannot read from camera in waitForObject\n";
+            continue;
+        }
+        rectangle(image, detectionRectangle.tl(), detectionRectangle.br(), Scalar(0, 255, 0), 2, 8, 0);
+        std::ostringstream oss;
+        oss << "Put object infront of camera Capturing in " << seconds - difftime(end,start) << " Seconds";
+        putText(image, oss.str() , Point(0,50), 2, .6, Scalar(0, 255, 0), 2);
+        imshow(windowName, image);
+    }
+}
+
+void setHSV(VideoCapture &feed){
+    Mat image, areaOfInterest, HSV;
+    //Rect detectionRectangle(FRAME_WIDTH/3, FRAME_HEIGHT/3, FRAME_WIDTH/3, FRAME_HEIGHT/3);
+	int scale = 100;
+	Rect detectionRectangle(Point(CENTER_WIDTH - scale, CENTER_HEIGHT - scale), Point(CENTER_WIDTH + scale, CENTER_HEIGHT + scale));
+    
+    //wait 5 seconds to capture object to be detected
+    waitForObject(feed, detectionRectangle, 5);
+    
+    //we will use this image to set HSV values
+    while(!feed.read(image)) std::cout << "Cannot read from camera in setHSV\n";
+    std::cout << "Got image, now finding HSV values" << std::endl;
+    
+    //Creates a rectangle of the area we only want to look at in the image
+    areaOfInterest = image(detectionRectangle);
+    
+    //converts rectangle from RGB to HSV
+    cvtColor(areaOfInterest, HSV,CV_BGR2HSV);
+    
+    CompareHSV(HSV);
+}
+
 int main(int argc, char* argv[])
 {
 	//Matrix to store each frame of the webcam feed
@@ -224,23 +283,31 @@ int main(int argc, char* argv[])
 	//x and y values for the location of the object
 	int x = 0, y = 0;
 	
-	//create slider bars for HSV filtering
-	createTrackbars();
-	
 	//video capture object to acquire webcam feed
-	VideoCapture capture;
-	
-	//open capture object at location zero (default location for webcam)
-	capture.open(0);
-		
-	//set height and width of capture frame
-	capture.set(CV_CAP_PROP_FRAME_WIDTH, FRAME_WIDTH);
-	capture.set(CV_CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT);
+	VideoCapture capture(0);
+    if(!capture.isOpened()){
+        std::cout << "Err: cannot open camera\n";
+        return -1;
+    }
+    
+    //set height and width of capture frame
+    capture.set(CV_CAP_PROP_FRAME_WIDTH, FRAME_WIDTH);
+    capture.set(CV_CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT);
+    
+    //get HSV values
+    setHSV(capture);
+    
+    //create slider bars for HSV filtering
+    createTrackbars();
+
 	//start an infinite loop where webcam feed is copied to cameraFeed matrix
 	//all of our operations will be performed within this loop
 	while (1){
 		//store image to matrix
-		capture.read(cameraFeed);
+        if(!capture.read(cameraFeed)){
+            std::cout << "Cannot read camera in main\n";
+            continue;
+        }
 		
 		//convert frame from BGR to HSV colorspace
 		cvtColor(cameraFeed, HSV, COLOR_BGR2HSV);
@@ -257,11 +324,14 @@ int main(int argc, char* argv[])
 		//this function will return the x and y coordinates of the
 		//filtered object
 		int trackedObjectArea = trackFilteredObject(x, y, threshold, cameraFeed);
+        
+        //draw center line and threshold lines
+        drawLines(cameraFeed);
 
 		//show frames 
 		imshow(windowName2, threshold);
 		imshow(windowName, cameraFeed);
-		imshow(windowName1, HSV);
+		//imshow(windowName1, HSV);
 
 		//delay 30ms so that screen can refresh.
 		//image will not appear without this waitKey() command
